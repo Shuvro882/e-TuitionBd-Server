@@ -47,20 +47,45 @@ async function run() {
       res.send(result);
     });
 
-    
+    app.patch("/users/:email", async (req, res) => {
+      const email = req.params.email;
+      const updatedData = req.body;
+
+      const result = await usersCollections.updateOne(
+        { email },
+        { $set: updatedData },
+      );
+
+      res.send(result);
+    });
 
     //tutor related apis
-    
-    app.get("/latest-tutors", async (req, res) => {
+
+    app.get("/tutors", async (req, res) => {
+      const limit = parseInt(req.query.limit);
+
       const query = {
         role: "tutor",
       };
 
-      const result = await usersCollections
-        .find(query)
-        .sort({ createdAt: -1 })
-        .limit(6)
-        .toArray();
+      let cursor = usersCollections.find(query).sort({ createdAt: -1 });
+
+      if (limit) {
+        cursor = cursor.limit(limit);
+      }
+
+      const result = await cursor.toArray();
+
+      res.send(result);
+    });
+
+
+    app.get("/tutors/:id", async (req, res) => {
+      const id = req.params.id;
+
+      const result = await usersCollections.findOne({
+        _id: new ObjectId(id),
+      });
 
       res.send(result);
     });
