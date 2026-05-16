@@ -109,6 +109,62 @@ async function run() {
       res.send(result);
     });
 
+    app.get("/applications/student/:email", async (req, res) => {
+      const email = req.params.email;
+
+      const query = {
+        studentEmail: email,
+      };
+
+      const result = await applicationsCollections
+        .find(query)
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      res.send(result);
+    });
+
+    app.get("/applications/tutor/:email", async (req, res) => {
+      const email = req.params.email;
+
+      const query = {
+        tutorEmail: email,
+      };
+
+      const result = await applicationsCollections
+        .find(query)
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      res.send(result);
+    });
+
+    app.patch("/applications/reject/:id", async (req, res) => {
+      const id = req.params.id;
+
+      const filter = { _id: new ObjectId(id) };
+
+      const updateDoc = {
+        $set: {
+          status: "rejected",
+        },
+      };
+
+      const result = await applicationsCollections.updateOne(filter, updateDoc);
+
+      res.send(result);
+    });
+
+    app.delete("/applications/:id", async (req, res) => {
+      const id = req.params.id;
+
+      const result = await applicationsCollections.deleteOne({
+        _id: new ObjectId(id),
+      });
+
+      res.send(result);
+    });
+
     //postTuition api
     app.get("/tuitions", async (req, res) => {
       const email = req.query.email;
