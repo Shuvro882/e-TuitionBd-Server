@@ -29,6 +29,7 @@ async function run() {
     const db = client.db("e_tuition_bd_db");
     const usersCollections = db.collection("users");
     const tuitionPostCollections = db.collection("tuitions");
+    const applicationsCollections = db.collection("applications");
     // const tutorsCollections = db.collection("tutors");
 
     //users related apis
@@ -93,6 +94,17 @@ async function run() {
       const result = await usersCollections.findOne({
         _id: new ObjectId(id),
       });
+
+      res.send(result);
+    });
+
+    //tuition application apis
+    app.post("/applications", async (req, res) => {
+      const application = req.body;
+
+      application.createdAt = new Date();
+
+      const result = await applicationsCollections.insertOne(application);
 
       res.send(result);
     });
@@ -175,7 +187,7 @@ async function run() {
 
       res.send(result);
     });
-    
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
