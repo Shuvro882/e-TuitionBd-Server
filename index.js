@@ -156,7 +156,26 @@ async function run() {
       res.send(result);
     });
 
-   
+    //public api
+    app.get("/approved-tuitions", async (req, res) => {
+      const result = await tuitionPostCollections
+        .find({ status: "Approved" })
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      res.send(result);
+    });
+
+    app.get("/tuitions/:id", async (req, res) => {
+      const id = req.params.id;
+
+      const result = await tuitionPostCollections.findOne({
+        _id: new ObjectId(id),
+      });
+
+      res.send(result);
+    });
+    
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
