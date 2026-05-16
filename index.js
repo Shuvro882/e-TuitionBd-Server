@@ -47,6 +47,14 @@ async function run() {
       res.send(result);
     });
 
+    app.get("/users/:email", async (req, res) => {
+      const email = req.params.email;
+
+      const result = await usersCollections.findOne({ email });
+
+      res.send(result);
+    });
+
     app.patch("/users/:email", async (req, res) => {
       const email = req.params.email;
       const updatedData = req.body;
@@ -79,7 +87,6 @@ async function run() {
       res.send(result);
     });
 
-
     app.get("/tutors/:id", async (req, res) => {
       const id = req.params.id;
 
@@ -105,9 +112,9 @@ async function run() {
 
     app.post("/tuitions", async (req, res) => {
       const tuition = req.body;
-      // default status set
+
       tuition.status = "Pending";
-      //parcel created time
+
       tuition.createdAt = new Date();
 
       const result = await tuitionPostCollections.insertOne(tuition);
@@ -122,6 +129,34 @@ async function run() {
       res.send(result);
     });
 
+    //admin related apis
+    app.get("/admin/tuitions", async (req, res) => {
+      const result = await tuitionPostCollections
+        .find()
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      res.send(result);
+    });
+
+    app.patch("/tuitions/status/:id", async (req, res) => {
+      const id = req.params.id;
+      const { status } = req.body;
+
+      const filter = { _id: new ObjectId(id) };
+
+      const updateDoc = {
+        $set: {
+          status: status,
+        },
+      };
+
+      const result = await tuitionPostCollections.updateOne(filter, updateDoc);
+
+      res.send(result);
+    });
+
+   
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
