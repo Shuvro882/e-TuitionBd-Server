@@ -3,7 +3,7 @@ const cors = require("cors");
 const app = express();
 require("dotenv").config();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
-
+const stripe = require("stripe")(process.env.STRIPE_SECRET);
 const port = process.env.PORT || 3000;
 
 //middleware
@@ -30,6 +30,7 @@ async function run() {
     const usersCollections = db.collection("users");
     const tuitionPostCollections = db.collection("tuitions");
     const applicationsCollections = db.collection("applications");
+    const paymentsCollections = db.collection("payments");
     // const tutorsCollections = db.collection("tutors");
 
     //users related apis
@@ -106,6 +107,13 @@ async function run() {
 
       const result = await applicationsCollections.insertOne(application);
 
+      res.send(result);
+    });
+
+    app.get("/applications/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await applicationsCollections.findOne(query);
       res.send(result);
     });
 
@@ -242,6 +250,136 @@ async function run() {
       });
 
       res.send(result);
+    });
+
+    //payment related apis
+    app.post("/payment-checkout-session", async (req, res) => {
+      try {
+        const paymentInfo = req.body;
+
+        // BDT TO USD
+        const exchangeRate = 110; // 1 USD = 110 BDT (approx safe rate)
+
+        const usdAmount = parseFloat(paymentInfo.budget) / exchangeRate;
+
+        const amount = Math.round(usdAmount * 100);
+
+        const session = await stripe.checkout.sessions.create({
+          
+
+          line_items: [
+            {
+              price_data: {
+                currency: "usd",
+
+                unit_amount: amount,
+
+                product_data: {
+                  name: `Tutor Payment: ${paymentInfo.tutorName}`,
+                },
+              },
+
+              quantity: 1,
+            },
+          ],
+
+          mode: "payment",
+
+          customer_email: paymentInfo.studentEmail,
+
+          metadata: {
+            applicationId: paymentInfo.applicationId,
+            tuitionId: paymentInfo.tuitionId,
+            tutorEmail: paymentInfo.tutorEmail,
+            studentEmail: paymentInfo.studentEmail,
+            budgetBDT: paymentInfo.budget,
+          },
+
+          success_url: `${process.env.SITE_DOMAIN}/dashboard/applied-tutors?session_id={CHECKOUT_SESSION_ID}&appId=${paymentInfo.applicationId}`,
+
+          cancel_url: `${process.env.SITE_DOMAIN}/dashboard/applied-tutors?cancel=true`,
+        });
+
+        res.send({
+          url: session.url,
+        });
+      } catch (error) {
+        console.log(error);
+
+        res.status(500).send({
+          message: "Stripe session failed",
+        });
+      }
+    });
+
+    app.patch("/applications/payment-success/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        const { transactionId } = req.body;
+
+        // CHECK EXISTING PAYMENT
+        const existingPayment = await paymentsCollections.findOne({
+          transactionId: transactionId,
+        });
+
+        // IF ALREADY EXISTS
+        if (existingPayment) {
+          return res.send({
+            message: "Payment already saved",
+          });
+        }
+
+        // GET STRIPE SESSION
+        const session = await stripe.checkout.sessions.retrieve(transactionId);
+
+        // UPDATE APPLICATION
+        const filter = {
+          _id: new ObjectId(id),
+        };
+
+        const updateDoc = {
+          $set: {
+            status: "approved",
+            paymentStatus: "paid",
+            transactionId: transactionId,
+            paidAt: new Date(),
+          },
+        };
+
+        await applicationsCollections.updateOne(filter, updateDoc);
+
+        // SAVE PAYMENT
+        const paymentDoc = {
+          applicationId: session.metadata.applicationId,
+
+          tuitionId: session.metadata.tuitionId,
+
+          tutorEmail: session.metadata.tutorEmail,
+
+          studentEmail: session.metadata.studentEmail,
+
+          amountUSD: session.amount_total / 100,
+
+          amountBDT: session.metadata.budgetBDT,
+
+          transactionId: transactionId,
+
+          paidAt: new Date(),
+        };
+
+        await paymentsCollections.insertOne(paymentDoc);
+
+        res.send({
+          message: "Payment saved successfully",
+        });
+      } catch (error) {
+        console.log(error);
+
+        res.status(500).send({
+          message: "Payment update failed",
+        });
+      }
     });
 
     // Send a ping to confirm a successful connection
