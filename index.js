@@ -1,6 +1,9 @@
 const express = require("express");
 const cors = require("cors");
 const app = express();
+const dns = require("dns");
+// Change DNS
+dns.setServers(["1.1.1.1", "8.8.8.8"]);
 require("dotenv").config();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const stripe = require("stripe")(process.env.STRIPE_SECRET);
@@ -103,10 +106,20 @@ async function run() {
     app.post("/applications", async (req, res) => {
       const application = req.body;
 
+      const existing = await applicationsCollections.findOne({
+        tuitionId: application.tuitionId,
+        tutorEmail: application.tutorEmail,
+      });
+
+      if (existing) {
+        return res.status(400).send({
+          message: "Already applied",
+        });
+      }
+
       application.createdAt = new Date();
 
       const result = await applicationsCollections.insertOne(application);
-
       res.send(result);
     });
 
@@ -258,15 +271,13 @@ async function run() {
         const paymentInfo = req.body;
 
         // BDT TO USD
-        const exchangeRate = 110; // 1 USD = 110 BDT (approx safe rate)
+        const exchangeRate = 125; // 1 USD = 110 BDT (approx safe rate)
 
         const usdAmount = parseFloat(paymentInfo.budget) / exchangeRate;
 
         const amount = Math.round(usdAmount * 100);
 
         const session = await stripe.checkout.sessions.create({
-          
-
           line_items: [
             {
               price_data: {
@@ -318,9 +329,15 @@ async function run() {
 
         const { transactionId } = req.body;
 
+        // GET STRIPE SESSION
+        const session = await stripe.checkout.sessions.retrieve(transactionId);
+
+        // REAL PAYMENT INTENT ID
+        const realTransactionId = session.payment_intent;
+
         // CHECK EXISTING PAYMENT
         const existingPayment = await paymentsCollections.findOne({
-          transactionId: transactionId,
+          transactionId: realTransactionId,
         });
 
         // IF ALREADY EXISTS
@@ -329,9 +346,6 @@ async function run() {
             message: "Payment already saved",
           });
         }
-
-        // GET STRIPE SESSION
-        const session = await stripe.checkout.sessions.retrieve(transactionId);
 
         // UPDATE APPLICATION
         const filter = {
@@ -342,7 +356,7 @@ async function run() {
           $set: {
             status: "approved",
             paymentStatus: "paid",
-            transactionId: transactionId,
+            transactionId: realTransactionId,
             paidAt: new Date(),
           },
         };
@@ -361,9 +375,9 @@ async function run() {
 
           amountUSD: session.amount_total / 100,
 
-          amountBDT: session.metadata.budgetBDT,
+          amountBDT: Number(session.metadata.budgetBDT),
 
-          transactionId: transactionId,
+          transactionId: realTransactionId,
 
           paidAt: new Date(),
         };
@@ -379,6 +393,29 @@ async function run() {
         res.status(500).send({
           message: "Payment update failed",
         });
+      }
+    });
+
+    // GET /payments?email=...
+    app.get("/payments", async (req, res) => {
+      try {
+        const email = req.query.email;
+
+        if (!email) {
+          return res.status(400).send({ message: "Email is required" });
+        }
+
+        const query = { studentEmail: email };
+
+        const result = await paymentsCollections
+          .find(query)
+          .sort({ paidAt: -1 })
+          .toArray();
+
+        res.send(result);
+      } catch (error) {
+        console.log(error);
+        res.status(500).send({ message: "Failed to get payments" });
       }
     });
 
