@@ -60,6 +60,33 @@ async function run() {
       res.send(result);
     });
 
+    // get user role
+    app.get("/users/role/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+
+        const user = await usersCollections.findOne({ email });
+
+        if (!user) {
+          return res.status(404).send({
+            message: "User not found",
+          });
+        }
+
+        res.send({
+          role: user.role,
+        });
+      } catch (error) {
+        console.log(error);
+
+        res.status(500).send({
+          message: "Failed to get role",
+        });
+      }
+    });
+
+
+
     app.patch("/users/:email", async (req, res) => {
       const email = req.params.email;
       const updatedData = req.body;
@@ -120,6 +147,23 @@ async function run() {
       application.createdAt = new Date();
 
       const result = await applicationsCollections.insertOne(application);
+      res.send(result);
+    });
+
+    app.get("/applications/tutor/ongoing/:email", async (req, res) => {
+      const email = req.params.email;
+
+      const query = {
+        tutorEmail: email,
+        status: "approved",
+        paymentStatus: "paid",
+      };
+
+      const result = await applicationsCollections
+        .find(query)
+        .sort({ createdAt: -1 })
+        .toArray();
+
       res.send(result);
     });
 
@@ -326,32 +370,32 @@ async function run() {
     app.patch("/applications/payment-success/:id", async (req, res) => {
       try {
         const id = req.params.id;
-    
+
         const { transactionId } = req.body;
-    
+
         // GET STRIPE SESSION
         const session = await stripe.checkout.sessions.retrieve(transactionId);
-    
+
         // REAL PAYMENT INTENT ID
         const realTransactionId = session.payment_intent;
-    
+
         // CHECK EXISTING PAYMENT
         const existingPayment = await paymentsCollections.findOne({
           transactionId: realTransactionId,
         });
-    
+
         // IF ALREADY EXISTS
         if (existingPayment) {
           return res.send({
             message: "Payment already saved",
           });
         }
-    
+
         // UPDATE APPLICATION
         const filter = {
           _id: new ObjectId(id),
         };
-    
+
         const updateDoc = {
           $set: {
             status: "approved",
@@ -360,36 +404,36 @@ async function run() {
             paidAt: new Date(),
           },
         };
-    
+
         await applicationsCollections.updateOne(filter, updateDoc);
-    
+
         // SAVE PAYMENT
         const paymentDoc = {
           applicationId: session.metadata.applicationId,
-    
+
           tuitionId: session.metadata.tuitionId,
-    
+
           tutorEmail: session.metadata.tutorEmail,
-    
+
           studentEmail: session.metadata.studentEmail,
-    
+
           amountUSD: session.amount_total / 100,
-    
+
           amountBDT: Number(session.metadata.budgetBDT),
-    
+
           transactionId: realTransactionId,
-    
+
           paidAt: new Date(),
         };
-    
+
         await paymentsCollections.insertOne(paymentDoc);
-    
+
         res.send({
           message: "Payment saved successfully",
         });
       } catch (error) {
         console.log(error);
-    
+
         res.status(500).send({
           message: "Payment update failed",
         });
@@ -423,20 +467,22 @@ async function run() {
 
     app.get("/payments/tutor", async (req, res) => {
       const email = req.query.email;
-    
+
       if (!email) {
         return res.status(400).send({ message: "Email required" });
       }
-    
+
       const query = { tutorEmail: email };
-    
+
       const result = await paymentsCollections
         .find(query)
         .sort({ paidAt: -1 })
         .toArray();
-    
+
       res.send(result);
     });
+
+
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
