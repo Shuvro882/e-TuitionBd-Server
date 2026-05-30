@@ -340,6 +340,15 @@ async function run() {
       }
     });
 
+    app.get("/admin/payments", async (req, res) => {
+      const result = await paymentsCollections
+        .find()
+        .sort({ paidAt: 1 })
+        .toArray();
+
+      res.send(result);
+    });
+
     app.delete("/users/:id", async (req, res) => {
       try {
         const id = req.params.id;
@@ -351,6 +360,46 @@ async function run() {
         res.send(result);
       } catch (error) {
         res.status(500).send({ message: "Delete failed" });
+      }
+    });
+
+    app.get("/admin/stats", async (req, res) => {
+      try {
+        const totalUsers = await usersCollections.countDocuments();
+        const totalTutors = await usersCollections.countDocuments({ role: "tutor" });
+
+        const totalTuitions = await tuitionPostCollections.countDocuments();
+        const approvedTuitions = await tuitionPostCollections.countDocuments({
+          status: "Approved",
+        });
+        const pendingTuitions = await tuitionPostCollections.countDocuments({
+          status: "Pending",
+        });
+
+        const revenueData = await paymentsCollections
+          .aggregate([
+            {
+              $group: {
+                _id: null,
+                totalRevenue: { $sum: "$amountBDT" },
+              },
+            },
+          ])
+          .toArray();
+
+        const totalRevenue = revenueData[0]?.totalRevenue || 0;
+
+        res.send({
+          totalUsers,
+          totalTutors,
+          totalTuitions,
+          approvedTuitions,
+          pendingTuitions,
+          totalRevenue,
+        });
+      } catch (error) {
+        console.log(error);
+        res.status(500).send({ message: "Failed to load admin stats" });
       }
     });
 
