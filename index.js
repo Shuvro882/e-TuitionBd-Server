@@ -289,6 +289,71 @@ async function run() {
       res.send(result);
     });
 
+    app.get("/users", async (req, res) => {
+      try {
+        const search = req.query.search || "";
+        const page = parseInt(req.query.page) || 0;
+        const limit = parseInt(req.query.limit) || 10;
+
+        const query = search
+          ? {
+            $or: [
+              { name: { $regex: search, $options: "i" } },
+              { email: { $regex: search, $options: "i" } },
+            ],
+          }
+          : {};
+
+        const users = await usersCollections
+          .find(query)
+          .skip(page * limit)
+          .limit(limit)
+          .sort({ createdAt: -1 })
+          .toArray();
+
+        const total = await usersCollections.countDocuments(query);
+
+        res.send({
+          users,
+          total,
+        });
+      } catch (error) {
+        res.status(500).send({ message: "Failed to get users" });
+      }
+    });
+
+    app.patch("/users/:id/role", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { role } = req.body;
+
+        const result = await usersCollections.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: { role },
+          }
+        );
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Role update failed" });
+      }
+    });
+
+    app.delete("/users/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        const result = await usersCollections.deleteOne({
+          _id: new ObjectId(id),
+        });
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Delete failed" });
+      }
+    });
+
     //public api
     app.get("/approved-tuitions", async (req, res) => {
       const result = await tuitionPostCollections
