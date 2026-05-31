@@ -13,8 +13,9 @@ const admin = require("firebase-admin");
 
 
 
-const decoded = Buffer.from(process.env.FB_SERVICE_KEY,'base64').toString('utf8')
-const serviceAccount = JSON.parse(decoded);
+const serviceAccount = JSON.parse(
+  Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString('utf8')
+);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
@@ -60,7 +61,7 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
 
     const db = client.db("e_tuition_bd_db");
     const usersCollections = db.collection("users");
