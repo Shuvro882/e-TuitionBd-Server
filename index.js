@@ -9,9 +9,42 @@ const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const stripe = require("stripe")(process.env.STRIPE_SECRET);
 const port = process.env.PORT || 3000;
 
+const admin = require("firebase-admin");
+
+
+
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY,'base64').toString('utf8')
+const serviceAccount = JSON.parse(decoded);
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
+
 //middleware
 app.use(express.json());
 app.use(cors());
+
+const verifyFBToken = async (req, res, next) => {
+  const token = req.headers.authorization;
+
+  if (!token) {
+    return res.status(401).send({ message: 'unauthorized access' })
+  }
+
+  try {
+    const idToken = token.split(' ')[1];
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    console.log('decoded in the token', decoded);
+    req.decoded_email = decoded.email;
+    next();
+
+  }
+  catch (err) {
+    return res.status(401).send({ message: 'unauthorized access' })
+  }
+
+}
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@db-first-server.9dfabil.mongodb.net/?appName=Db-first-server`;
 
@@ -35,6 +68,19 @@ async function run() {
     const applicationsCollections = db.collection("applications");
     const paymentsCollections = db.collection("payments");
     // const tutorsCollections = db.collection("tutors");
+
+    //middleware admin before allowin admin activity
+    const verifyAdmin = async(req,res,next) =>{
+      const email = req.decoded_email;
+      const query = { email: req.decoded_email };
+      const user = await usersCollections.findOne(query);
+
+      if(!user || user.role !== 'admin' ){
+        return res.status(403).send({message: 'forbidden access'});
+      }
+      
+      next();
+    }
 
     //users related apis
     app.post("/users", async (req, res) => {
@@ -174,7 +220,7 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/applications/student/:email", async (req, res) => {
+    app.get("/applications/student/:email", verifyFBToken, async (req, res) => {
       const email = req.params.email;
 
       const query = {
@@ -189,7 +235,7 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/applications/tutor/:email", async (req, res) => {
+    app.get("/applications/tutor/:email",verifyFBToken, async (req, res) => {
       const email = req.params.email;
 
       const query = {
@@ -263,7 +309,7 @@ async function run() {
     });
 
     //admin related apis
-    app.get("/admin/tuitions", async (req, res) => {
+    app.get("/admin/tuitions",verifyFBToken, verifyAdmin, async (req, res) => {
       const result = await tuitionPostCollections
         .find()
         .sort({ createdAt: -1 })
@@ -322,7 +368,7 @@ async function run() {
       }
     });
 
-    app.patch("/users/:id/role", async (req, res) => {
+    app.patch("/users/:id/role",verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const id = req.params.id;
         const { role } = req.body;
@@ -340,7 +386,7 @@ async function run() {
       }
     });
 
-    app.get("/admin/payments", async (req, res) => {
+    app.get("/admin/payments",verifyFBToken, verifyAdmin, async (req, res) => {
       const result = await paymentsCollections
         .find()
         .sort({ paidAt: 1 })
@@ -349,7 +395,7 @@ async function run() {
       res.send(result);
     });
 
-    app.delete("/users/:id", async (req, res) => {
+    app.delete("/users/:id",verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const id = req.params.id;
 
@@ -363,7 +409,7 @@ async function run() {
       }
     });
 
-    app.get("/admin/stats", async (req, res) => {
+    app.get("/admin/stats",verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const totalUsers = await usersCollections.countDocuments();
         const totalTutors = await usersCollections.countDocuments({ role: "tutor" });
@@ -405,12 +451,80 @@ async function run() {
 
     //public api
     app.get("/approved-tuitions", async (req, res) => {
-      const result = await tuitionPostCollections
-        .find({ status: "Approved" })
-        .sort({ createdAt: -1 })
-        .toArray();
+      try {
+        const search = req.query.search || "";
+        const page = parseInt(req.query.page) || 0;
+        const limit = parseInt(req.query.limit) || 6;
 
-      res.send(result);
+        const sort = req.query.sort || "";
+
+        const className = req.query.class || "";
+        const subject = req.query.subject || "";
+        const location = req.query.location || "";
+
+        const query = {
+          status: "Approved",
+        };
+
+        // Search
+        if (search) {
+          query.$or = [
+            { subjects: { $regex: search, $options: "i" } },
+            { location: { $regex: search, $options: "i" } },
+          ];
+        }
+
+        // Advanced Filter
+        if (className) {
+          query.class = className;
+        }
+
+        if (subject) {
+          query.subjects = subject;
+        }
+
+        if (location) {
+          query.location = location;
+        }
+
+        // Sort
+        let sortOption = { createdAt: -1 };
+
+        if (sort === "budgetAsc") {
+          sortOption = { budget: 1 };
+        }
+
+        if (sort === "budgetDesc") {
+          sortOption = { budget: -1 };
+        }
+
+        if (sort === "oldest") {
+          sortOption = { createdAt: 1 };
+        }
+
+        if (sort === "newest") {
+          sortOption = { createdAt: -1 };
+        }
+
+        const result = await tuitionPostCollections
+          .find(query)
+          .sort(sortOption)
+          .skip(page * limit)
+          .limit(limit)
+          .toArray();
+
+        const total = await tuitionPostCollections.countDocuments(query);
+
+        res.send({
+          tuitions: result,
+          total,
+        });
+      } catch (error) {
+        console.log(error);
+        res.status(500).send({
+          message: "Failed to get tuitions",
+        });
+      }
     });
 
     app.get("/tuitions/:id", async (req, res) => {
@@ -555,12 +669,17 @@ async function run() {
     });
 
     // GET /payments?email=...
-    app.get("/payments", async (req, res) => {
+    app.get("/payments", verifyFBToken, async (req, res) => {
       try {
         const email = req.query.email;
 
         if (!email) {
           return res.status(400).send({ message: "Email is required" });
+        }
+
+        //  AUTH CHECK
+        if (email !== req.decoded_email) {
+          return res.status(403).send({ message: "Forbidden access" });
         }
 
         const query = { studentEmail: email };
@@ -571,6 +690,7 @@ async function run() {
           .toArray();
 
         res.send(result);
+
       } catch (error) {
         console.log(error);
         res.status(500).send({ message: "Failed to get payments" });
@@ -599,10 +719,10 @@ async function run() {
 
 
     // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!",
-    );
+    // await client.db("admin").command({ ping: 1 });
+    // console.log(
+    //   "Pinged your deployment. You successfully connected to MongoDB!",
+    // );
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
